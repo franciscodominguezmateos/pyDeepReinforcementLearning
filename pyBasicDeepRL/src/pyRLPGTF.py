@@ -51,7 +51,7 @@ class PGNetwork:
         self.loss=tf.reduce_mean(self.rewards*self.cross_entropies)
         
         #training operation
-        self.optimizer=tf.train.RMSPropOptimizer(learning_rate=0.001,decay=0.99)
+        self.optimizer=tf.train.RMSPropOptimizer(learning_rate=0.005,decay=0.99)
         self.train_op=self.optimizer.minimize(self.loss)
         
     def getAction(self,state):
@@ -76,17 +76,17 @@ def playEpisode(pgnn):
         #decide what move to play: UP, STILL, DOWN (through NN model)
         action=pgnn.getAction(state)
         #play it (through openAI gym pong simulator)
-        game_state, reward, done, info = world.step(action)
+        state, reward, done, info = world.step(action)
         #collect results
         statesList.append(state)
         actionsList.append(action)
         rewardsList.append(reward)
         episode_reward+=reward
-    #process the rewards after each episode
-    #Discountand Normalize reguards
+    # Process the rewards after each episode
+    # Discount and Normalize reguards
     processed_rewards=discount_rewards (rewardsList,gamma)
     processed_rewards=normalize_rewards(processed_rewards)
-    #Convert list to np.array
+    # Convert list to np.array
     npstates =np.vstack(statesList)
     npactions=np.vstack(actionsList)#[:,0]
     nprewards=np.vstack(processed_rewards)#[:,0]
@@ -98,10 +98,10 @@ pgnn=PGNetwork()
 
 init = tf.initialize_all_variables()
 
-render=False
-restore=False
+world.render=False
+restore=True
 gamma = 0.99 # discount factor for reward
-BATCH_SIZE=10
+BATCH_SIZE=20
 saver = tf.train.Saver()
 with tf.Session() as sess:
     sess.run(init)
@@ -117,18 +117,22 @@ with tf.Session() as sess:
         npactions_batch=np.empty((0,1))
         nprewards_batch=np.empty((0,1))
         while num_episodes_batch< BATCH_SIZE:
-            #Play a episode
+            # Play a episode
             npstates,npactions,nprewards,episode_reward=playEpisode(pgnn)
-            #append data to the batch
-            npstates_batch =np.vstack((npstates_batch ,npstates ))
-            npactions_batch=np.vstack((npactions_batch,npactions))
-            nprewards_batch=np.vstack((nprewards_batch,nprewards))
+            if episode_reward>-21:
+                # Append data to the batch
+                npstates_batch =np.vstack((npstates_batch ,npstates ))
+                npactions_batch=np.vstack((npactions_batch,npactions))
+                nprewards_batch=np.vstack((nprewards_batch,nprewards))
+                num_episodes_batch+=1
             #running mean of rewards
             episode_reward_mean=0.99*episode_reward_mean+0.01*episode_reward
-            #counts
+            # Feedback info
+            if num_episodes_batch%5==0:
+                print(num_episodes,"eb=",num_episodes_batch,"batch=",num_batches,"epmn=",episode_reward_mean,"eprw=",episode_reward)
+            # Counts
             num_episodes+=1
-            num_episodes_batch+=1
-            print(num_episodes_batch,"batch=",num_batches,"epmn=",episode_reward_mean,"eprw=",episode_reward)
+
 
         print("Training this batch with shape=",npstates_batch.shape)
         pgnn.train(npstates_batch,npactions_batch[:,0],nprewards_batch[:,0])
