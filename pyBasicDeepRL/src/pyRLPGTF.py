@@ -4,6 +4,7 @@ Created on Nov 20, 2017
 @author: Francisco Dominguez
 from:
 https://www.youtube.com/watch?v=aRKOJHRbXeo
+https://github.com/awjuliani/DeepRL-Agents/blob/master/Vanilla-Policy.ipynb
 
 '''
 import tensorflow as tf
@@ -34,33 +35,56 @@ class PGNetwork:
     def __init__(self):
         tf.reset_default_graph()
         self.observations=tf.placeholder(shape=[None,80*80],dtype=tf.float32)#pixels
-        self.actions     =tf.placeholder(shape=[None],dtype=tf.uint8)#0,1,2 for up, still, down
+        self.actions     =tf.placeholder(shape=[None],dtype=tf.int32)#0,1,2 for up, still, down
         self.rewards     =tf.placeholder(shape=[None],dtype=tf.float32) #+1,-1, with discounts
         
         #model
         self.Y=tf.layers.dense(self.observations,200,activation=tf.nn.relu)
-        self.Ylogits=tf.layers.dense(self.Y,3)
+        self.logits=tf.layers.dense(self.Y,3)
+        
+        #get probabilities
+        self.prob=tf.nn.softmax(self.logits)
+        
+        #get log probabilities
+        self.logprob=tf.log(self.prob+1e-13)
         
         #sample an action from predicted probabilities
-        self.sample_op=tf.multinomial(logits=tf.reshape(self.Ylogits,shape=(1,3)),num_samples=1)
+        self.sample_op=tf.multinomial(logits=tf.reshape(self.logits,shape=(1,3)),num_samples=1)
+        
+        #get the best action, that with biggest logits
+        self.best_action=tf.argmax(self.logits,axis=1)
+        
+        #onehot action
+        self.one_hot=tf.one_hot(self.actions,3)
         
         #loss
-        self.cross_entropies=tf.losses.softmax_cross_entropy(onehot_labels=tf.one_hot(self.actions,3),logits=self.Ylogits)
+        #self.cross_entropies=tf.losses.softmax_cross_entropy(onehot_labels=self.one_hot,logits=self.logits)
+        self.cross_entropies=tf.nn.softmax_cross_entropy_with_logits(labels=self.one_hot,logits=self.logits)
+        #self.cross_entropies=-tf.reduce_sum(self.logprob*self.one_hot,1)
         
-        #loss=tf.reduce_sum(rewards*cross_entropies)
-        self.loss=tf.reduce_mean(self.rewards*self.cross_entropies)
+        self.loss=tf.reduce_sum(self.rewards*self.cross_entropies)
+        #self.loss=tf.reduce_mean(self.rewards*self.cross_entropies)
         
         #training operation
         self.optimizer=tf.train.RMSPropOptimizer(learning_rate=0.005,decay=0.99)
         self.train_op=self.optimizer.minimize(self.loss)
         
+    def getBestAction(self,state):
+        action=sess.run(self.besAction,feed_dict={self.observations:[state]})
+        return action
+    
     def getAction(self,state):
         action=sess.run(self.sample_op,feed_dict={self.observations:[state]})
         return action
     
     def train(self,npstates_batch,npactions_batch,nprewards_batch):
         feed_dict={self.observations:npstates_batch, self.actions:npactions_batch,self.rewards:nprewards_batch}
-        sess.run(self.train_op,feed_dict=feed_dict)
+        one_hot,cross_entropies,logits,loss,_=sess.run([self.one_hot,self.cross_entropies,self.logits,self.loss,self.train_op],feed_dict=feed_dict)
+        #print("logits=",logits)
+        #print("cross_entropies",cross_entropies)
+        #print("onehot=",one_hot)
+        #print("nprewards_batch=",nprewards_batch)
+        return loss
 
 def playEpisode(pgnn):
     #reset everything
@@ -92,6 +116,8 @@ def playEpisode(pgnn):
     nprewards=np.vstack(processed_rewards)#[:,0]
     return npstates,npactions,nprewards,episode_reward
 
+print("tf.version",tf.VERSION)
+
 world = World()
 
 pgnn=PGNetwork()
@@ -99,9 +125,9 @@ pgnn=PGNetwork()
 init = tf.initialize_all_variables()
 
 world.render=False
-restore=True
+restore=False
 gamma = 0.99 # discount factor for reward
-BATCH_SIZE=20
+BATCH_SIZE=50
 saver = tf.train.Saver()
 with tf.Session() as sess:
     sess.run(init)
@@ -119,23 +145,22 @@ with tf.Session() as sess:
         while num_episodes_batch< BATCH_SIZE:
             # Play a episode
             npstates,npactions,nprewards,episode_reward=playEpisode(pgnn)
-            if episode_reward>-21:
-                # Append data to the batch
-                npstates_batch =np.vstack((npstates_batch ,npstates ))
-                npactions_batch=np.vstack((npactions_batch,npactions))
-                nprewards_batch=np.vstack((nprewards_batch,nprewards))
-                num_episodes_batch+=1
+            # Append data to the batch
+            npstates_batch =np.vstack((npstates_batch ,npstates ))
+            npactions_batch=np.vstack((npactions_batch,npactions))
+            nprewards_batch=np.vstack((nprewards_batch,nprewards))
+            num_episodes_batch+=1
             #running mean of rewards
             episode_reward_mean=0.99*episode_reward_mean+0.01*episode_reward
             # Feedback info
-            if num_episodes_batch%5==0:
+            if num_episodes%1==0:
                 print(num_episodes,"eb=",num_episodes_batch,"batch=",num_batches,"epmn=",episode_reward_mean,"eprw=",episode_reward)
             # Counts
             num_episodes+=1
 
 
-        print("Training this batch with shape=",npstates_batch.shape)
-        pgnn.train(npstates_batch,npactions_batch[:,0],nprewards_batch[:,0])
+        loss=pgnn.train(npstates_batch,npactions_batch[:,0],nprewards_batch[:,0])
+        print("Training this batch with shape=",npstates_batch.shape," loss=",loss)
         num_batches+=1
         if num_batches%10==0:
             save_path = saver.save(sess, "model.ckpt")
