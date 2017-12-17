@@ -39,8 +39,8 @@ class PGNetwork:
         self.rewards     =tf.placeholder(shape=[None],dtype=tf.float32) #+1,-1, with discounts
         
         #model
-        self.Y=tf.layers.dense(self.observations,200,activation=tf.nn.relu)
-        self.logits=tf.layers.dense(self.Y,3)
+        self.h1=tf.layers.dense(self.observations,200,activation=tf.nn.relu)
+        self.logits=tf.layers.dense(self.h1,3)
         
         #get probabilities
         self.prob=tf.nn.softmax(self.logits)
@@ -51,7 +51,7 @@ class PGNetwork:
         #sample an action from predicted probabilities
         self.sample_op=tf.multinomial(logits=tf.reshape(self.logits,shape=(1,3)),num_samples=1)
         
-        #get the best action, that with biggest logits
+        #get the best action, that with biggest logit
         self.best_action=tf.argmax(self.logits,axis=1)
         
         #onehot action
@@ -62,15 +62,18 @@ class PGNetwork:
         self.cross_entropies=tf.nn.softmax_cross_entropy_with_logits(labels=self.one_hot,logits=self.logits)
         #self.cross_entropies=-tf.reduce_sum(self.logprob*self.one_hot,1)
         
-        self.loss=tf.reduce_sum(self.rewards*self.cross_entropies)
-        #self.loss=tf.reduce_mean(self.rewards*self.cross_entropies)
+        #the actual advantage loss is A*log(pi(a|s)) but as A=-rewards because we want 
+        #to minimize then the loss is -rewards*log(pi(a|s))
+        #or ¿doesn't it?
+        #self.loss=tf.reduce_sum(-self.rewards*self.cross_entropies)
+        self.loss=tf.reduce_mean(-self.rewards*self.cross_entropies)
         
         #training operation
-        self.optimizer=tf.train.RMSPropOptimizer(learning_rate=0.005,decay=0.99)
+        self.optimizer=tf.train.RMSPropOptimizer(learning_rate=0.000001,decay=0.99)
         self.train_op=self.optimizer.minimize(self.loss)
         
     def getBestAction(self,state):
-        action=sess.run(self.besAction,feed_dict={self.observations:[state]})
+        action=sess.run(self.best_action,feed_dict={self.observations:[state]})
         return action
     
     def getAction(self,state):
@@ -83,7 +86,7 @@ class PGNetwork:
         #print("logits=",logits)
         #print("cross_entropies",cross_entropies)
         #print("onehot=",one_hot)
-        #print("nprewards_batch=",nprewards_batch)
+        #print("nprewards_batch=",nprewards_batch.min())
         return loss
 
 def playEpisode(pgnn):
@@ -127,7 +130,7 @@ init = tf.initialize_all_variables()
 world.render=False
 restore=False
 gamma = 0.99 # discount factor for reward
-BATCH_SIZE=50
+BATCH_SIZE=10
 saver = tf.train.Saver()
 with tf.Session() as sess:
     sess.run(init)
@@ -142,35 +145,30 @@ with tf.Session() as sess:
         npstates_batch =np.empty((0,80*80))
         npactions_batch=np.empty((0,1))
         nprewards_batch=np.empty((0,1))
-        while num_episodes_batch< BATCH_SIZE:
+        for num_episodes_batch in range(BATCH_SIZE):
             # Play a episode
             npstates,npactions,nprewards,episode_reward=playEpisode(pgnn)
             # Append data to the batch
             npstates_batch =np.vstack((npstates_batch ,npstates ))
             npactions_batch=np.vstack((npactions_batch,npactions))
             nprewards_batch=np.vstack((nprewards_batch,nprewards))
-            num_episodes_batch+=1
             #running mean of rewards
             episode_reward_mean=0.99*episode_reward_mean+0.01*episode_reward
             # Feedback info
             if num_episodes%1==0:
-                print(num_episodes,"eb=",num_episodes_batch,"batch=",num_batches,"epmn=",episode_reward_mean,"eprw=",episode_reward)
+                print("{:6.0f}".format(num_episodes),
+                      "eb={:6.0f}".format(num_episodes_batch),
+                      "batch={:6.0f}".format(num_batches),
+                      "epmn={:2.4f}".format(episode_reward_mean),
+                      "eprw={:2.0f}".format(episode_reward))
             # Counts
             num_episodes+=1
 
-
         loss=pgnn.train(npstates_batch,npactions_batch[:,0],nprewards_batch[:,0])
-        print("Training this batch with shape=",npstates_batch.shape," loss=",loss)
+        print("Training this batch with shape=",npstates_batch.shape,
+              " loss={:2.6f}".format(loss))
         num_batches+=1
         if num_batches%10==0:
             save_path = saver.save(sess, "model.ckpt")
             print("Model saved in file: %s" % save_path)
 
- 
-        
-        
-        
-        
-        
-        
-        

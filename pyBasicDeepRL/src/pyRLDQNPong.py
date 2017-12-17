@@ -59,13 +59,16 @@ class QNetwork:
             
             self.loss = tf.reduce_mean(tf.square(self.targetQs_ - self.Qsa))
             self.opt = tf.train.AdamOptimizer(learning_rate).minimize(self.loss)
+            
     def getQ(self,state):
         feed = {self.inputs_: state.reshape((1, *state.shape))}
         Q = sess.run(self.output, feed_dict=feed)
         return Q
+    
     def getQs(self,states):
         Qs = sess.run(mainQN.output, feed_dict={mainQN.inputs_: states})
         return Qs
+    
     def getBestAction(self,state):
             feed = {self.inputs_: state.reshape((1, *state.shape))}
             Qs = sess.run(self.output, feed_dict=feed)
@@ -74,18 +77,18 @@ class QNetwork:
 
             
 
-train_episodes = 10000        # max number of episodes to learn from
+train_episodes = 200000        # max number of episodes to learn from
 max_steps = 2000                # max steps in an episode
-gamma = 0.999                   # future reward discount
+gamma = 0.99                   # future reward discount
 
 # Exploration parameters
 explore_start = 1.0            # exploration probability at start
-explore_stop = 0.05            # minimum exploration probability 
+explore_stop = 0.01            # minimum exploration probability 
 decay_rate = 0.000001          # exponential decay rate for exploration prob
 
 # Network parameters
 hidden_size = 100              # number of units in each Q-network hidden layer
-learning_rate = 0.0001         # Q-network learning rate
+learning_rate = 0.000001         # Q-network learning rate
 
 # Memory parameters
 memory_size = 10000            # memory capacity
@@ -101,7 +104,7 @@ state, reward, done, _ = world.stepSample()
 
 memory = Memory(max_size=memory_size)
 
-restore=True
+restore=False
  
 # Make a bunch of random actions and store the experiences
 for ii in range(pretrain_length):
@@ -139,6 +142,7 @@ with tf.Session() as sess:
         #saver.restore(sess, tf.train.latest_checkpoint('checkpoints'))
         saver.restore(sess, "checkpoints/pong.ckpt")    
     step = 0
+    mean_reward=-21
     for ep in range(1, train_episodes):
         total_reward = 0
         t = 0
@@ -167,10 +171,14 @@ with tf.Session() as sess:
 
                 t = max_steps
                 
+                #run mean reward of episodes
+                mean_reward=0.99*mean_reward+0.01*total_reward
+                
                 print('Episode: {}'.format(ep),
+                      'Mean reward: {:2.4f}'.format(mean_reward),
                       'Total reward: {}'.format(total_reward),
-                      'Training loss: {:.4f}'.format(loss),
-                      'Explore P: {:.4f}'.format(explore_p))
+                      'Training loss: {:2.4f}'.format(loss),
+                      'Explore P: {:2.4f}'.format(explore_p))
                 rewards_list.append((ep, total_reward))
                 
                 # Add experience to memory
@@ -188,6 +196,7 @@ with tf.Session() as sess:
             
             # Sample mini-batch from memory
             batch   = memory.sample(batch_size)
+            # Split information from batch
             states  = np.array([each[0] for each in batch])
             actions = np.array([each[1] for each in batch])
             rewards = np.array([each[2] for each in batch])
